@@ -95,6 +95,14 @@ function Write-Info {
     Write-Output $Message
 }
 
+# Emits a machine-readable change marker consumed by Jmix Studio's finish step.
+# Gated by JMIX_EMIT_CHANGE_MARKERS so manual CLI runs print nothing extra.
+function Write-ChangeMarker {
+    param([string]$Action, [string]$Type, [string]$Path)
+    if ($env:JMIX_EMIT_CHANGE_MARKERS -ne '1') { return }
+    Write-Output "@@JMIX_CHANGE@@`taction=$Action`ttype=$Type`tpath=$Path"
+}
+
 # Emits environment + tool versions through Write-Verbose (shown only with -Verbose)
 # to help diagnose user problems.
 function Write-EnvDiagnostics {
@@ -466,8 +474,10 @@ function Invoke-CmdSkills {
         $storeDir = Join-Path $HOME (Join-Path '.agents/.jmix/skills' $script:ResolvedVersionDir)
     }
 
+    $storeExisted = Test-Path $storeDir
     Write-Verbose "scope=$resolvedScope root=$root store=$storeDir"
     Install-SkillsToStore -StoreDir $storeDir
+    Write-ChangeMarker -Action $(if ($storeExisted) { 'updated' } else { 'created' }) -Type 'dir' -Path $storeDir
 
     Write-Info ''
     Write-Info 'Linking store skills into agent dirs'
@@ -477,7 +487,9 @@ function Invoke-CmdSkills {
         if ($seen.ContainsKey($rel)) { continue }
         $seen[$rel] = $true
         $agentDir = Join-Path $root $rel
+        $agentDirExisted = Test-Path $agentDir
         New-SkillSymlinks -AgentDir $agentDir -StoreDir $storeDir
+        Write-ChangeMarker -Action $(if ($agentDirExisted) { 'updated' } else { 'created' }) -Type 'dir' -Path $agentDir
         Write-Info "  Linked skills into $agentDir"
     }
 
@@ -515,7 +527,9 @@ function Install-AgentsMdFor {
         New-Item -ItemType Directory -Path $destDir -Force | Out-Null
     }
 
+    $destExisted = Test-Path $dest
     Write-Dest -Src $script:SourceAgentsMd -Dest $dest -Label $dest
+    Write-ChangeMarker -Action $(if ($destExisted) { 'updated' } else { 'created' }) -Type 'file' -Path $dest
     Write-Info "  Project guidelines installed for $label"
 }
 
@@ -555,6 +569,7 @@ function Set-OpencodeMcpEntry {
     }
     $json.mcp | Add-Member -MemberType NoteProperty -Name $Name -Value ([PSCustomObject]$Entry)
     $json | ConvertTo-Json -Depth 10 | Out-File -FilePath $file -Encoding utf8
+    Write-ChangeMarker -Action 'updated' -Type 'file' -Path $file
     Write-Info "Updated $file with $Name MCP entry."
 }
 
@@ -690,6 +705,7 @@ function Install-PlaywrightForAgents {
     # skills dir so they coexist with other skills already present there.
     $root = $HOME
     $storeDir = Join-Path $HOME '.agents/.playwright/skills'
+    $storeExisted = Test-Path $storeDir
 
     # @playwright/cli install --skills writes to <cwd>/.claude/skills/<skill>.
     # Run it inside a private staging dir so nothing leaks into the project or a
@@ -726,6 +742,7 @@ function Install-PlaywrightForAgents {
         if ($count -eq 0) {
             Write-ErrAndExit "no Playwright skill folders found under $produced"
         }
+        Write-ChangeMarker -Action $(if ($storeExisted) { 'updated' } else { 'created' }) -Type 'dir' -Path $storeDir
 
         Write-Info ''
         Write-Info 'Linking store skills into agent dirs'
@@ -735,7 +752,9 @@ function Install-PlaywrightForAgents {
             if ($seen.ContainsKey($rel)) { continue }
             $seen[$rel] = $true
             $agentDir = Join-Path $root $rel
+            $agentDirExisted = Test-Path $agentDir
             New-SkillSymlinks -AgentDir $agentDir -StoreDir $storeDir
+            Write-ChangeMarker -Action $(if ($agentDirExisted) { 'updated' } else { 'created' }) -Type 'dir' -Path $agentDir
             Write-Info "  Linked skills into $agentDir"
         }
 

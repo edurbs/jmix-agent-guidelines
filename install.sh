@@ -122,6 +122,14 @@ write_dest() {
     fi
 }
 
+# Emits a machine-readable change marker consumed by Jmix Studio's finish step.
+# Gated by JMIX_EMIT_CHANGE_MARKERS so manual CLI runs print nothing extra.
+# $1 - action (created|updated|backed-up)  $2 - type (file|dir)  $3 - absolute path
+emit_change() {
+    [ "${JMIX_EMIT_CHANGE_MARKERS:-0}" = "1" ] || return 0
+    printf '@@JMIX_CHANGE@@\taction=%s\ttype=%s\tpath=%s\n' "$1" "$2" "$3"
+}
+
 # Parses a comma-separated agents list. Single value (e.g. "claude") is allowed.
 # Validates each token. Emits a space-separated list to stdout.
 # $1 - csv string (may be empty)
@@ -497,8 +505,12 @@ cmd_skills() {
         store_dir="${HOME}/.agents/.jmix/skills/${RESOLVED_VERSION_DIR}"
     fi
 
+    local store_existed=0
+    [ -d "$store_dir" ] && store_existed=1
+
     vlog "scope=${scope} root=${root} store=${store_dir}"
     install_skills_to_store "$store_dir"
+    emit_change "$([ "$store_existed" -eq 1 ] && printf updated || printf created)" dir "$store_dir"
 
     log ""
     log "Linking store skills into agent dirs"
@@ -510,7 +522,10 @@ cmd_skills() {
         esac
         seen="${seen}${rel} "
         agent_dir="${root}/${rel}"
+        local agent_dir_existed=0
+        [ -d "$agent_dir" ] && agent_dir_existed=1
         link_skills_into_dir "$agent_dir" "$store_dir"
+        emit_change "$([ "$agent_dir_existed" -eq 1 ] && printf updated || printf created)" dir "$agent_dir"
         log "  Linked skills into ${agent_dir}"
     done
 
@@ -548,7 +563,10 @@ install_agents_md_for() {
     dest_dir="$(dirname "$dest")"
     mkdir -p "$dest_dir" || die "cannot create directory ${dest_dir}"
 
+    local dest_existed=0
+    [ -e "$dest" ] && dest_existed=1
     write_dest "$SOURCE_AGENTS_MD" "$dest" "$dest"
+    emit_change "$([ "$dest_existed" -eq 1 ] && printf updated || printf created)" file "$dest"
     log "  Project guidelines installed for ${label}"
 }
 
@@ -629,6 +647,7 @@ EOF
     tmp="$(mktemp)"
     jq '.mcp = (.mcp // {}) | .mcp.jetbrains = {"type":"remote","url":"http://localhost:64342/sse","enabled":true}' "$config_file" > "$tmp"
     mv "$tmp" "$config_file"
+    emit_change updated file "$config_file"
     log "Updated ${config_file} with JetBrains MCP entry."
 }
 
@@ -720,6 +739,7 @@ EOF
     tmp="$(mktemp)"
     jq --arg key "$key" '.mcp = (.mcp // {}) | .mcp.context7 = {"type":"local","command":["npx","-y","@upstash/context7-mcp","--api-key",$key],"enabled":true}' "$config_file" > "$tmp"
     mv "$tmp" "$config_file"
+    emit_change updated file "$config_file"
     log "Updated ${config_file} with Context7 MCP entry."
 }
 
@@ -821,6 +841,8 @@ cmd_playwright() {
     # skills dir so they coexist with other skills already present there.
     local root="${HOME}"
     local store_dir="${HOME}/.agents/.playwright/skills"
+    local store_existed=0
+    [ -d "$store_dir" ] && store_existed=1
 
     # @playwright/cli install --skills writes to <cwd>/.claude/skills/<skill>.
     # Run it inside a private staging dir so nothing leaks into the project or a
@@ -848,6 +870,7 @@ cmd_playwright() {
         count=$((count + 1))
     done
     [ "$count" -gt 0 ] || die "no Playwright skill folders found under ${produced}"
+    emit_change "$([ "$store_existed" -eq 1 ] && printf updated || printf created)" dir "$store_dir"
 
     log ""
     log "Linking store skills into agent dirs"
@@ -859,7 +882,10 @@ cmd_playwright() {
         esac
         seen="${seen}${rel} "
         agent_dir="${root}/${rel}"
+        local agent_dir_existed=0
+        [ -d "$agent_dir" ] && agent_dir_existed=1
         link_skills_into_dir "$agent_dir" "$store_dir"
+        emit_change "$([ "$agent_dir_existed" -eq 1 ] && printf updated || printf created)" dir "$agent_dir"
         log "  Linked skills into ${agent_dir}"
     done
 

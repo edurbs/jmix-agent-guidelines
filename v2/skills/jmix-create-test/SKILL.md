@@ -95,9 +95,142 @@ class CustomerUiTest {
 
 Use the project's helper for component lookup if it exists. Otherwise keep a local typed helper small and explicit.
 
-## End-To-End Tests
+## Test Type Comparison
 
-Use Masquerade/Selenide or the project's browser-test stack when browser verification is required. Enable test ids only in a test profile and prefer stable component ids over text selectors.
+| | Unit | Integration | UI Integration (`@UiTest`) | End-to-End (Masquerade) |
+|---|---|---|---|---|
+| **Spring context** | No | Yes | Yes | No (runs against live app) |
+| **Browser** | No | No | No | Yes (Selenide/Selenium) |
+| **Speed** | Fastest | Fast | Medium | Slowest |
+| **What it tests** | Pure logic | Service layer + DB | Server-side Vaadin component tree | Real user-facing UI |
+| **Best for** | Calculators, validators, mappers | Service methods, data access | View logic, navigation, data binding | Critical user flows, login, CRUD |
+
+## UI Integration Tests (`@UiTest`)
+
+Tests the server-side Vaadin component tree directly — no real browser. The `@UiTest` annotation starts Vaadin, configures application views, and sets up authentication.
+
+### Key API
+
+- `UiTestUtils.getCurrentView()` — returns the view currently opened by navigation
+- `UiComponentUtils.getComponent(view, componentId)` — finds a component by its XML `id` attribute
+- `ViewNavigators` — programmatic navigation between views
+- `@UiTest` — JUnit 5 extension that starts Vaadin + configures views + sets up auth
+
+Ref: https://docs.jmix.io/jmix/testing/ui-integration-tests.html
+
+## End-to-End UI Tests (Masquerade)
+
+Page Object pattern library built on **Selenide/Selenium WebDriver**. Drives a **real browser** against a running app. Supports views, components, dialogs, notifications, and composites. Requires Jmix 2.6+.
+
+Ref: https://docs.jmix.io/jmix/testing/masquerade.html
+
+### Key Packages
+
+| Class | Package | Purpose |
+|---|---|---|
+| `Masquerade` | `io.jmix.masquerade` | Entry point — static `$j()` methods |
+| `@TestView` | `io.jmix.masquerade` | Marks a view wrapper class |
+| `@TestComponent` | `io.jmix.masquerade` | Marks a component field in a wrapper (wires by `j-test-id`) |
+| `View<T>` | `io.jmix.masquerade.sys` | Base class for view wrappers |
+| `Button`, `TextField`, etc. | `io.jmix.masquerade.component` | Component wrappers |
+| `@FindBy` | `org.openqa.selenium.support` | Selenium annotation — locates by CSS/ID/XPath (NOT a Masquerade annotation) |
+
+### How Component Lookup Works
+
+Masquerade uses the HTML attribute `j-test-id` to locate components. When `jmix.ui.ui-test-mode=true` is set, Jmix generates this attribute on every UI component, using the component's XML `id` as the value.
+
+Two ways to declare component fields in wrappers:
+
+1. **`@TestComponent`** (preferred) — matches field name to `j-test-id`. Use `path` when the j-test-id differs from the field name or for nested elements.
+2. **`@FindBy`** (Selenium) — locates by CSS selector, ID, or XPath. Use for components not covered by `j-test-id` (e.g., the login form's native Vaadin elements).
+
+### Setup
+
+**build.gradle:**
+```gradle
+testImplementation 'io.jmix.masquerade:jmix-masquerade'
+```
+
+**application.properties** (enables `j-test-id` attribute generation on all UI components):
+```properties
+jmix.ui.ui-test-mode=true
+```
+
+**Selenide configuration:**
+```java
+@BeforeAll
+static void setupSelenide() {
+    baseUrl = "http://localhost:8080";
+    timeout = 10000;
+    browser = CHROME;
+    headless = true;
+}
+```
+
+### View Wrappers (Page Objects)
+
+Each Jmix view gets a wrapper class annotated with `@TestView`, extending `View<Self>`. Use `@TestComponent` for Jmix components (matched by `j-test-id`) and `@FindBy` for raw HTML elements.
+
+```java
+@TestView(id = "MyView")
+public class MyView extends View<MyView> {
+
+    // Field name matches j-test-id by default
+    @TestComponent
+    private EntityComboBox entityComboBox;
+
+    // Use path when j-test-id differs from field name or for nested lookup
+    @TestComponent(path = "myButton")
+    private Button button;
+
+    // @FindBy for elements not accessible via j-test-id
+    @FindBy(xpath = "//vaadin-text-area[@class='my-text-area']")
+    private TextArea textArea;
+}
+```
+
+### Writing Tests
+
+```java
+public class LoginUiTest {
+
+    @BeforeAll
+    static void setup() { /* Selenide config */ }
+
+    @Test
+    void loginAsAdmin() {
+        Selenide.open("/");
+        LoginView loginView = Masquerade.$j(LoginView.class);
+
+        loginView.getUsernameField().shouldHave(value("admin"))
+                .setValue("").setValue("admin");
+        loginView.getPasswordField().shouldHave(value("admin"))
+                .setValue("").setValue("admin");
+        loginView.getButton().shouldHave(text("Log in")).click();
+    }
+}
+```
+
+### Key API
+
+- `Masquerade.$j(Class<T> clazz)` — gets a view wrapper for the current page
+- `Masquerade.$j(String uiTestId)` — access element directly by `j-test-id` value
+- `Masquerade.$j(Class<T> clazz, String... path)` — get wrapper class by nested `j-test-id` path
+- `@TestComponent` — wires field to component by `j-test-id` (field name = test ID by default)
+- `@TestComponent(path = "...")` — wires field with explicit `j-test-id` path
+- `@FindBy(css/id/xpath = "...")` — Selenium locator for raw HTML elements outside `j-test-id` scope
+
+### Accessing Fragments
+
+For fragments not declared in the view wrapper, use `$j` with the wrapper class directly:
+
+```java
+$j(TestFragment.class)
+        .getTestField()
+        .shouldHave(value(""))
+        .setValue("Fragment_2")
+        .shouldHave(value("Fragment_2"));
+```
 
 ## Cleanup Audit
 

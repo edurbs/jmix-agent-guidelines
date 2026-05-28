@@ -6,7 +6,7 @@
   },
   "versions": {
     "v2": {
-      "sha256": "c62e27a9326c41eba122f504ade0e0b9a7b241dea9bb32c0a47e04f33f6f2f9c",
+      "sha256": "4b6dbd409081a74bca9d4c603547739bf7d04b4eeb1137f3a4f4b9f15d63b95f",
       "skills": [
         "jmix-add-dialog-detail-flow",
         "jmix-add-entity-event-listener",
